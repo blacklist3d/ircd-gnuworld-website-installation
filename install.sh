@@ -1,17 +1,5 @@
 #!/bin/bash
 
-###############################################################################
-# Nefarious2 + Undernet GNUWorld + Website Installer
-# Ubuntu/Debian
-# Installs:
-#   - Nefarious2 IRCd from evilnet/nefarious2
-#   - GNUWorld services from UndernetIRC/gnuworld
-#   - PostgreSQL
-#   - Apache + PHP + required modules
-#   - Website directory structure
-# Runs as user: gnuworld
-###############################################################################
-
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -24,8 +12,10 @@ INSTALL_DIR="${INSTALL_DIR:-/home/gnuworld}"
 NEFARIOUS_DIR="${NEFARIOUS_DIR:-$INSTALL_DIR/nefarious2}"
 GNUWORLD_DIR="${GNUWORLD_DIR:-$INSTALL_DIR/gnuworld}"
 WEBSITE_DIR="${WEBSITE_DIR:-$INSTALL_DIR/website}"
+
 GNUWORLD_USER="${GNUWORLD_USER:-gnuworld}"
 GNUWORLD_GROUP="${GNUWORLD_GROUP:-gnuworld}"
+
 PGUSER="${PGUSER:-gnuworld}"
 PGPASSWORD="${PGPASSWORD:-$(openssl rand -base64 24 | tr -d '\n')}"
 PGHOST="${PGHOST:-localhost}"
@@ -45,90 +35,37 @@ require_root() {
 detect_os() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
-        OS_ID="${ID:-}"
-        OS_VERSION="${VERSION_ID:-}"
     else
-        log_error "Unable to detect OS"
+        log_error "Unable to detect OS release"
     fi
 
-    case "$OS_ID" in
-        ubuntu|debian)
-            ;;
-        *)
-            log_error "This script supports Ubuntu and Debian only. Detected: ${OS_ID:-unknown}"
-            ;;
+    case "${ID:-}" in
+        ubuntu|debian) ;;
+        *) log_error "Unsupported OS: ${ID:-unknown}. This script supports Ubuntu and Debian." ;;
     esac
 
-    log_ok "Detected OS: $OS_ID $OS_VERSION"
+    log_ok "Detected OS: ${ID} ${VERSION_ID:-}"
 }
 
 install_packages() {
     log_info "Updating apt and installing packages..."
     export DEBIAN_FRONTEND=noninteractive
+
     apt-get update
     apt-get install -y --no-install-recommends \
-        build-essential \
-        autoconf \
-        automake \
-        autotools-dev \
-        libtool \
-        pkg-config \
-        git \
-        curl \
-        wget \
-        ca-certificates \
-        gnupg \
-        sudo \
-        openssl \
-        bison \
-        flex \
-        libssl-dev \
-        zlib1g-dev \
-        libxml2-dev \
-        libcurl4-openssl-dev \
-        libboost-all-dev \
-        libpq-dev \
-        postgresql \
-        postgresql-contrib \
-        postgresql-client \
-        apache2 \
-        apache2-utils \
-        php \
-        php-cli \
-        php-fpm \
-        php-pgsql \
-        php-curl \
-        php-xml \
-        php-gd \
-        php-mbstring \
-        php-json \
-        php-zip \
-        php-intl \
-        php-common \
-        libapache2-mod-php \
-        python3 \
-        python3-pip \
-        python3-venv \
-        supervisor \
-        libmysqlclient-dev \
-        default-libmysqlclient-dev \
-        mariadb-client \
-        mariadb-server \
-        sqlite3 \
-        libsqlite3-dev \
-        tcl8.6 \
-        tcl8.6-dev \
-        nano \
-        vim \
-        htop \
-        tmux
+        build-essential autoconf automake autotools-dev libtool pkg-config git curl wget ca-certificates \
+        libssl-dev zlib1g-dev libcurl4-openssl-dev libxml2-dev libboost-all-dev libpq-dev \
+        postgresql postgresql-contrib postgresql-client apache2 apache2-utils php php-cli php-fpm \
+        php-pgsql php-curl php-xml php-gd php-mbstring php-json php-zip php-intl libapache2-mod-php \
+        python3 python3-pip python3-venv supervisor sqlite3 libsqlite3-dev \
+        tcl8.6 tcl8.6-dev nano vim htop tmux openssl sudo
 
     log_ok "Packages installed"
 }
 
 create_gnuworld_user() {
     if ! id "$GNUWORLD_USER" >/dev/null 2>&1; then
-        log_info "Creating user and group: $GNUWORLD_USER"
+        log_info "Creating user/group: $GNUWORLD_USER"
         groupadd "$GNUWORLD_GROUP" || true
         useradd -r -m -g "$GNUWORLD_GROUP" -d "$INSTALL_DIR" -s /bin/bash "$GNUWORLD_USER"
     else
@@ -139,18 +76,18 @@ create_gnuworld_user() {
     chown -R "$GNUWORLD_USER:$GNUWORLD_GROUP" "$INSTALL_DIR"
     chmod 755 "$INSTALL_DIR"
 
-    if ! grep -q "^${GNUWORLD_USER} ALL=(ALL) NOPASSWD:ALL" /etc/sudoers.d/gnuworld 2>/dev/null; then
+    if [[ ! -f /etc/sudoers.d/gnuworld ]]; then
         echo "${GNUWORLD_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gnuworld
         chmod 0440 /etc/sudoers.d/gnuworld
     fi
 
-    cat >> /etc/security/limits.conf <<'EOF'
+    cat >> /etc/security/limits.conf <<EOF
 
 # GNUWorld service limits
-gnuworld soft nofile 65535
-gnuworld hard nofile 65535
-gnuworld soft nproc 32768
-gnuworld hard nproc 32768
+${GNUWORLD_USER} soft nofile 65535
+${GNUWORLD_USER} hard nofile 65535
+${GNUWORLD_USER} soft nproc 32768
+${GNUWORLD_USER} hard nproc 32768
 EOF
 
     log_ok "User setup complete"
@@ -164,7 +101,7 @@ clone_repos() {
         git clone https://github.com/evilnet/nefarious2.git "$NEFARIOUS_DIR"
     else
         log_warn "Nefarious2 already exists; updating"
-        git -C "$NEFARIOUS_DIR" pull --ff-only origin master || git -C "$NEFARIOUS_DIR" pull --ff-only origin main || true
+        git -C "$NEFARIOUS_DIR" pull --ff-only || true
     fi
 
     if [[ ! -d "$GNUWORLD_DIR/.git" ]]; then
@@ -172,7 +109,7 @@ clone_repos() {
         git clone https://github.com/UndernetIRC/gnuworld.git "$GNUWORLD_DIR"
     else
         log_warn "GNUWorld already exists; updating"
-        git -C "$GNUWORLD_DIR" pull --ff-only origin master || git -C "$GNUWORLD_DIR" pull --ff-only origin main || true
+        git -C "$GNUWORLD_DIR" pull --ff-only || true
     fi
 
     chown -R "$GNUWORLD_USER:$GNUWORLD_GROUP" "$INSTALL_DIR"
@@ -210,24 +147,17 @@ build_gnuworld() {
 }
 
 configure_postgresql() {
-    log_info "Configuring PostgreSQL and database users..."
-
-    if ! systemctl is-enabled postgresql >/dev/null 2>&1; then
-        systemctl enable postgresql || true
-    fi
+    log_info "Preparing PostgreSQL..."
+    systemctl enable postgresql || true
     systemctl restart postgresql || true
 
     sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${PGUSER}'" | grep -q 1 || \
         sudo -u postgres psql -c "CREATE USER ${PGUSER} WITH PASSWORD '${PGPASSWORD}';"
 
-    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='gnuworld_services'" | grep -q 1 || \
-        sudo -u postgres createdb -O "$PGUSER" gnuworld_services
-
-    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='gnuworld_web'" | grep -q 1 || \
-        sudo -u postgres createdb -O "$PGUSER" gnuworld_web
-
-    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='gnuworld_logs'" | grep -q 1 || \
-        sudo -u postgres createdb -O "$PGUSER" gnuworld_logs
+    for db in gnuworld_services gnuworld_web gnuworld_logs; do
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${db}'" | grep -q 1 || \
+            sudo -u postgres createdb -O "$PGUSER" "$db"
+    done
 
     cat > "$INSTALL_DIR/.pgpass" <<EOF
 $PGHOST:$PGPORT:gnuworld_services:$PGUSER:$PGPASSWORD
@@ -244,6 +174,7 @@ User: $PGUSER
 Password: $PGPASSWORD
 Host: $PGHOST
 Port: $PGPORT
+
 Databases:
   - gnuworld_services
   - gnuworld_web
@@ -258,7 +189,6 @@ EOF
 prepare_config_dir() {
     mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/logs"
     chown -R "$GNUWORLD_USER:$GNUWORLD_GROUP" "$INSTALL_DIR/config" "$INSTALL_DIR/logs"
-    chmod 755 "$INSTALL_DIR/config" "$INSTALL_DIR/logs"
 
     if [[ ! -f "$INSTALL_DIR/config/ircd.conf" ]]; then
         cat > "$INSTALL_DIR/config/ircd.conf" <<'EOF'
@@ -307,7 +237,6 @@ EOF
     if [[ ! -f "$INSTALL_DIR/config/gnuworld.conf" ]]; then
         cat > "$INSTALL_DIR/config/gnuworld.conf" <<EOF
 # Example GNUWorld configuration
-# Adjust as needed for your network and PostgreSQL credentials
 
 uplink {
     server = "127.0.0.1";
@@ -332,6 +261,7 @@ EOF
     fi
 
     chown "$GNUWORLD_USER:$GNUWORLD_GROUP" "$INSTALL_DIR/config/ircd.conf" "$INSTALL_DIR/config/gnuworld.conf"
+    chmod 600 "$INSTALL_DIR/config/ircd.conf" "$INSTALL_DIR/config/gnuworld.conf"
     log_ok "Config files created"
 }
 
@@ -373,9 +303,8 @@ EOF
 }
 
 setup_apache() {
-    log_info "Configuring Apache for PHP website..."
-    mkdir -p "$WEBSITE_DIR/public" "$WEBSITE_DIR/logs" "$WEBSITE_DIR/config"
-    chown -R "$GNUWORLD_USER:$GNUWORLD_GROUP" "$WEBSITE_DIR"
+    log_info "Configuring Apache/PHP..."
+    mkdir -p "$WEBSITE_DIR/public" "$WEBSITE_DIR/logs"
 
     cat > "$WEBSITE_DIR/public/index.php" <<'PHP'
 <?php
@@ -405,9 +334,12 @@ PHP
 </VirtualHost>
 EOF
 
+    chown -R "$GNUWORLD_USER:$GNUWORLD_GROUP" "$WEBSITE_DIR"
+
     a2enmod rewrite proxy proxy_fcgi ssl headers || true
     a2dissite 000-default.conf || true
     a2ensite gnuworld-website.conf || true
+
     apache2ctl configtest
     systemctl restart apache2 || true
     systemctl restart php8.2-fpm 2>/dev/null || true
@@ -443,6 +375,7 @@ case "$1" in
         ;;
 esac
 SCRIPT
+
     chmod 755 /usr/local/bin/gnuworld-ctl
     log_ok "Control script installed: /usr/local/bin/gnuworld-ctl"
 }
@@ -453,26 +386,27 @@ print_summary() {
     echo -e "${GREEN}Installation complete${NC}"
     echo -e "${GREEN}==============================================${NC}"
     echo
-    echo -e "${YELLOW}Installed Components:${NC}"
+    echo -e "${YELLOW}Installed:${NC}"
     echo "  - Nefarious2: $NEFARIOUS_DIR/install"
     echo "  - GNUWorld:   $GNUWORLD_DIR/install"
     echo "  - Website:    $WEBSITE_DIR"
-    echo "  - PostgreSQL: configured for gnuworld user"
-    echo "  - Apache/PHP: enabled"
+    echo "  - PostgreSQL: configured"
+    echo "  - Apache/PHP: configured"
     echo
     echo -e "${YELLOW}Important files:${NC}"
-    echo "  - IRCD config:     $INSTALL_DIR/config/ircd.conf"
-    echo "  - GNUWorld config: $INSTALL_DIR/config/gnuworld.conf"
-    echo "  - DB creds:        $INSTALL_DIR/DATABASE_CREDENTIALS.txt"
-    echo "  - PG pass:         $INSTALL_DIR/.pgpass"
+    echo "  - IRCD config:       $INSTALL_DIR/config/ircd.conf"
+    echo "  - GNUWorld config:   $INSTALL_DIR/config/gnuworld.conf"
+    echo "  - DB credentials:    $INSTALL_DIR/DATABASE_CREDENTIALS.txt"
+    echo "  - .pgpass:           $INSTALL_DIR/.pgpass"
     echo
     echo -e "${YELLOW}Service control:${NC}"
     echo "  - /usr/local/bin/gnuworld-ctl start|stop|restart|status|logs"
     echo "  - supervisorctl status"
     echo
-    echo -e "${YELLOW}Default password note:${NC}"
-    echo "  - Postgres user password is generated randomly and saved to: $INSTALL_DIR/DATABASE_CREDENTIALS.txt"
-    echo "  - Update the sample config files before starting services"
+    echo -e "${YELLOW}Before starting services:${NC}"
+    echo "  - Edit $INSTALL_DIR/config/ircd.conf"
+    echo "  - Edit $INSTALL_DIR/config/gnuworld.conf"
+    echo "  - Check PostgreSQL credentials in $INSTALL_DIR/DATABASE_CREDENTIALS.txt"
     echo
 }
 
